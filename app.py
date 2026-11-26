@@ -1,44 +1,45 @@
-from flask import Flask, render_template, request, redirect, url_for
-from repository.personaje_repository import obtener_todos, guardar
-from models.personajes import Personaje
-from services.personaje_service import validar_personaje
+"""Punto de arranque del RPG Manager (Flask).
 
-app = Flask(__name__)
+1. Lee config.ini (copia config.example.ini y pon tus datos).
+2. La fábrica crea el repositorio que diga [app] repositorio.
+3. El Service recibe ese repositorio por el constructor.
+4. El controlador recibe el Service.
+"""
+import configparser
+import os
+import sys
 
-@app.route('/personajes')
-def listar_personajes():
-    mis_personajes = obtener_todos()
+from flask import Flask
 
-    if not mis_personajes:
-        mis_personajes = [{'nombre': 'Thadeo', 'clase': 'Guerrero', 'nivel': 5, 'vida': 20}]
+from controlador.personaje_controlador import crear_controlador
+from repositorio.repository_factory import crear_repositorio
+from servicio.personaje_service import PersonajeService
 
-    return render_template('personajes.html', personajes=mis_personajes)
+CARPETA = os.path.dirname(os.path.abspath(__file__))
 
-@app.route('/personajes', methods=['POST'])
-def crear_personaje():
-    nombre = request.form.get('nombre')
-    clase = request.form.get('clase')
 
-    # Convertimos de forma segura DENTRO de la función para evitar el ValueError si vienen vacíos
-    nivel_raw = request.form.get('nivel')
-    nivel = int(nivel_raw) if nivel_raw and nivel_raw.isdigit() else 0
+def leer_configuracion(ruta=None):
+    ruta = ruta or os.path.join(CARPETA, "config.ini")
+    if not os.path.exists(ruta):
+        sys.exit("No existe config.ini. Copia config.example.ini como config.ini y pon tus datos.")
+    cfg = configparser.ConfigParser()
+    cfg.read(ruta, encoding="utf-8")
+    return cfg
 
-    vida_raw = request.form.get('vida')
-    vida = int(vida_raw) if vida_raw and vida_raw.isdigit() else 0
 
-    # 1. Llamamos al Servicio para validar
-    errores = validar_personaje(nombre, clase, nivel, vida)
+def crear_app(cfg=None, repositorio=None):
+    # >>> SALA 4.1 · El arranque arma la cadena
+    cfg = cfg or leer_configuracion()
+    repositorio = repositorio or crear_repositorio(cfg)   # aquí se elige el motor
+    service = PersonajeService(repositorio)                # inyección por constructor
 
-    # 2. Si hay errores, volvemos a mostrar la vista junto con la lista de personajes actual
-    if errores:
-        mis_personajes = obtener_todos()
-        return render_template('personajes.html', errores=errores, personajes=mis_personajes)
+    app = Flask(__name__)
+    app.json.ensure_ascii = False
+    app.register_blueprint(crear_controlador(service, cfg.get("app", "repositorio")))
+    return app
+    # <<< FIN SALA 4.1
 
-    # 3. Solo si NO hubo errores, guardamos el personaje
-    personaje = Personaje(nombre=nombre, clase=clase, nivel=nivel, vida=vida)
-    guardar(personaje)
 
-    return redirect('/personajes')
-
-if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+if __name__ == "__main__":
+    aplicacion = crear_app()
+    aplicacion.run(port=5000, debug=False)
